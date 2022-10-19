@@ -22,6 +22,7 @@ def grad_uncompress(grads, compressed_grads, d_type="float32"):
     return grads
 
 def ring_all_reduce(comm, grads, compression=True):
+    # https://youtu.be/rj-hjS5L8Bw?t=1018 watch this not english but should still make sence
     """
     1. split grads into equal chunks dependent on comm.Get_size()
     2. send chunk[comm.Get_rank()] to (comm.Get_rank()+1 % comm.Get_size())
@@ -31,6 +32,7 @@ def ring_all_reduce(comm, grads, compression=True):
     """
     rank = comm.Get_rank()
     size = comm.Get_size
+    token = 0
     if not compression:
         flat_grads = jax.tree_flatten(grads)
         grads = flat_grads[0]
@@ -39,17 +41,35 @@ def ring_all_reduce(comm, grads, compression=True):
     grads = jnp.concatenate((grads[:(rank+1)], grads[(rank+1):]))
 
     for i, j in enumerate(grads):  # jaxify this
+
         if comm.Get_rank() == 0:
-            token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm)
+            if token:
+                token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm, token=token)
+            else:
+                token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm)
             new_chunk, token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm, token=token)
-            grads[i+1] = grads[i+1] + new_chunk  # vmap this
+            grads[(i+1) % size] = grads[(i+1) % size] + new_chunk  # vmap this
 
         else:
-            new_chunk, token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm)
-            grads[i+1] = grads[i+1] + new_chunk  # vmap this
+            if token:  # TODO have to check if this works
+                new_chunk, token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm, token=token)
+            else:
+                new_chunk, token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm)
+            grads[(i+1) % size] = grads[(i+1) % size] + new_chunk  # vmap this
             token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm, token=token)
 
-    grads = jnp.concatenate((grads[:(rank-1) % size], grads[(rank-1) % size:]))
+    grads = jnp.concatenate((grads[1:], grads[:1]))  # set completed arr to index 0
+
+    for i, j in enumerate(grads):
+        if comm.Get_rank() == 0:
+            token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm, token=token)
+            grads[(i+1) % size], token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm, token=token)
+
+        else:
+            grads[(i+1) % size], token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm, token=token)
+            token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm, token=token)
+
+    grads = jnp.concatenate((grads[:(rank-2) % size], grads[(rank-2) % size:]))  # arrange back to norm
     grads = jax.vmap(lambda x: x/size)(grads) #this wont work just temp
 
     if not compression:
