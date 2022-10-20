@@ -3,7 +3,7 @@ from mpi4py import MPI
 import mpi4jax
 import jax.numpy as jnp
 
-#  mpirun --mca btl 
+#  mpirun --mca btl
 
 #TODO account for multiple gpus (use pmap)
 
@@ -78,19 +78,28 @@ def ring_all_reduce(comm, grads, compression=True):
     else:
         return grads
 
-
-
-
-
-
-
-
-
+def asyn_ring_all_reduce():
+    """
+    1. Start thread that receives grads
+    2. repeat above process but instead of waiting for recieved_grads call thread results
+    """
+    pass
 
 
 
 
 def PairAverageOpt(comm, params):
+    """
+    see Kung Fu docs https://kungfu.readthedocs.io/en/latest/?badge=latest
+    Asynchronous Decentralized Parallel Stochastic Gradient Descent, ICML 2018
+    https://arxiv.org/abs/1710.06952
+
+    1. start Thread that waits for param request
+    2. after param update select random rank from comm
+    3. send a pull request and receive model params from selected rank
+    4. average params with local params
+    5. save params to thread to allow other processes to average with updated params
+    """
     pass
 
 
