@@ -3,6 +3,7 @@ from mpi4py import MPI
 import mpi4jax
 import jax.numpy as jnp
 
+#  mpirun --mca btl 
 
 #TODO account for multiple gpus (use pmap)
 
