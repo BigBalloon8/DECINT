@@ -4,6 +4,7 @@ import mpi4jax
 import jax.numpy as jnp
 import threading
 import node
+import random
 
 # mpirun --mca btl
 
@@ -26,6 +27,31 @@ def grad_uncompress(grads, compressed_grads, d_type="float32"):
     return grads
 
 
+class MpiThread(threading.Thread):
+    def __init__(self, params):
+        super().__init__()
+        self.params = params
+        self.token = None
+
+    def run(self):
+        while True:
+            dest = DECINT-node.node.message_handler()
+            if dest:
+                self.token = jax.jit(mpi4jax.send)(self.params, dest=dest, token=self.token)
+
+    def __setitem__(self, key, value):
+        if key == "params":
+            self.params = value
+        else:
+            raise KeyError
+
+    def __getitem__(self, key):
+        if key == "params":
+            return self.params
+        else:
+            raise KeyError
+
+@jax.jit
 def ring_all_reduce(comm, grads, compression=True):
     # https://youtu.be/rj-hjS5L8Bw?t=1018 watch this not english but should still make sence
     """
@@ -36,7 +62,7 @@ def ring_all_reduce(comm, grads, compression=True):
     5. repeat with chunk + 1 and so on till all comms have a sum all chunks then / by comm.Get_size()
     """
     rank = comm.Get_rank()
-    size = comm.Get_size
+    size = comm.Get_size()
     if not compression:
         flat_grads = jax.tree_flatten(grads)
         grads = flat_grads[0]
@@ -76,38 +102,26 @@ def ring_all_reduce(comm, grads, compression=True):
     else:
         return grads
 
-def asyn_ring_all_reduce():
+def asyn_ring_all_reduce(comm, grads, compression=True):
     """
     1. Start thread that receives grads
     2. repeat above process but instead of waiting for recieved_grads call thread results
     """
-    pass
-
-class MpiThread(threading.Thread):
-    def __init__(self, params):
-        super().__init__()
-        self.params = params
-        self.token = None
-
-    def run(self):
-        #dest = node.message
-        self.token = mpi4jax.send(self.params, dest=dest)
-
-    def __setitem__(self, key, value):
-        if key == "params":
-            self.params = params
-        else:
-            raise KeyError
-
-    def __getitem__(self, item):
-        if key == "params":
-            return self.params
-        else:
-            raise KeyError
+    thread = MpiThread()
+    thread.start()
+    if not compression:
+        flat_grads = jax.tree_flatten(grads)
+        grads = flat_grads[0]
 
 
 
-def PairAverageOpt(comm, params):
+    if not compression:
+        return jax.tree_unflatten(flat_grads[1], grads)
+    else:
+        return grads
+
+
+def PairAverageOpt(comm, params, thread:MpiThread, token=None):
     """
     see Kung Fu docs https://kungfu.readthedocs.io/en/latest/?badge=latest
     Asynchronous Decentralized Parallel Stochastic Gradient Descent, ICML 2018
@@ -119,7 +133,19 @@ def PairAverageOpt(comm, params):
     4. average params with local params
     5. save params to thread to allow other processes to average with updated params
     """
-    pass
+
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    flat_params = jax.tree_flatten(params)
+    thread["params"] = falt_params[0]
+    while True:
+        random_rank = random.randint(0, size-1)
+        if random_rank != rank:
+            break
+    send_req_to_rank()
+    ranks_params, token = mpi4jax.recv(flat_params[0], random_rank, comm=comm, token=token)
+    params = jax.tree_map(lambda x,y: (x+y)/2., flat_params[0], ranks_params)
+    return params
 
 
 def update_params(optimizer_, grads, opt_state, params, comm,synchronicity=False, compression=True, compression_d_type="float16"):
@@ -141,7 +167,7 @@ def update_params(optimizer_, grads, opt_state, params, comm,synchronicity=False
     # PREPARE GRADIENTS
     else:
         pass
-        # GET GRADIENTS
+    # GET GRADIENTS
 
         # HANDLE GRADIENTS
 
