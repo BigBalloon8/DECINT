@@ -2,10 +2,13 @@ import jax
 from mpi4py import MPI
 import mpi4jax
 import jax.numpy as jnp
+import threading
+import node
 
-#  mpirun --mca btl
+# mpirun --mca btl
 
-#TODO account for multiple gpus (use pmap)
+# TODO account for multiple gpus (use pmap)
+
 
 @jax.jit
 def grad_compress(grads, d_type="float16"):
@@ -22,6 +25,7 @@ def grad_uncompress(grads, compressed_grads, d_type="float32"):
     grads = jax.tree_unflatten(flat_grads[1], inter_flat_grads)
     return grads
 
+
 def ring_all_reduce(comm, grads, compression=True):
     # https://youtu.be/rj-hjS5L8Bw?t=1018 watch this not english but should still make sence
     """
@@ -33,29 +37,23 @@ def ring_all_reduce(comm, grads, compression=True):
     """
     rank = comm.Get_rank()
     size = comm.Get_size
-    token = 0
     if not compression:
         flat_grads = jax.tree_flatten(grads)
         grads = flat_grads[0]
 
     grads = jnp.array_split(grads, size)
     grads = jnp.concatenate((grads[:(rank+1)], grads[(rank+1):]))
+    token = mpi4jax.barrier(comm=comm)
 
     for i, j in enumerate(grads):  # jaxify this
 
         if comm.Get_rank() == 0:
-            if token:
-                token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm, token=token)
-            else:
-                token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm)
+            token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm, token=token)
             new_chunk, token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm, token=token)
             grads[(i+1) % size] = grads[(i+1) % size] + new_chunk  # vmap this
 
         else:
-            if token:  # TODO have to check if this works
-                new_chunk, token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm, token=token)
-            else:
-                new_chunk, token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm)
+            new_chunk, token = mpi4jax.recv(j, source=((rank-1) % size), comm=comm, token=token)
             grads[(i+1) % size] = grads[(i+1) % size] + new_chunk  # vmap this
             token = mpi4jax.send(j, dest=((rank+1) % size), comm=comm, token=token)
 
@@ -85,6 +83,27 @@ def asyn_ring_all_reduce():
     """
     pass
 
+class MpiThread(threading.Thread):
+    def __init__(self, params):
+        super().__init__()
+        self.params = params
+        self.token = None
+
+    def run(self):
+        #dest = node.message
+        self.token = mpi4jax.send(self.params, dest=dest)
+
+    def __setitem__(self, key, value):
+        if key == "params":
+            self.params = params
+        else:
+            raise KeyError
+
+    def __getitem__(self, item):
+        if key == "params":
+            return self.params
+        else:
+            raise KeyError
 
 
 
