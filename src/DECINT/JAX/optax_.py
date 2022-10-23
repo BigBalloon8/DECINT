@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import threading
 import node
 import random
+import DECINT_ai
 
 # mpirun --mca btl
 
@@ -27,7 +28,7 @@ def grad_uncompress(grads, compressed_grads, d_type="float32"):
     return grads
 
 
-class MpiThread(threading.Thread):
+class PairAverageThread(threading.Thread):
     def __init__(self, params):
         super().__init__()
         self.params = params
@@ -35,7 +36,7 @@ class MpiThread(threading.Thread):
 
     def run(self):
         while True:
-            dest = DECINT-node.node.message_handler()
+            dest = DECINT_ai.node.message_handler("REQ")
             if dest:
                 self.token = jax.jit(mpi4jax.send)(self.params, dest=dest, token=self.token)
 
@@ -50,6 +51,43 @@ class MpiThread(threading.Thread):
             return self.params
         else:
             raise KeyError
+
+
+
+class DECINTMPIThread(threading.Thread):
+    def __init__(self, params, comm):
+        # grads something the same shape as grads
+        super().__init__()
+        self.params = self.zeros(params)
+        self.num_params = 0
+        self.token = None
+        self.comm = comm
+        self.size = comm.Get_size()
+        self.rank = comm.Get_rank()
+
+    @staticmethod
+    def zeros(params):
+        return [jnp.zeros_like(i) for i in params]
+
+
+    def run(self):
+        while True:
+            recieved_params, self.token = mpi4jax.recv(self.params, (self.rank - 1)%self.size, comm= self.comm, token = self.token)
+            self.params = jax.tree_map(lambda x,y: jnp.sum(x,y), recieved_params, self.params)
+            self.num_params +=1
+
+    def __getitem__(self, key):
+        if key == "params":
+            if self.num_params == 0:
+                raise Exception("must call put params before running func") #TODO use custom Exception or just skip this step
+            ret_params = jax.tree_map(lambda x: x/self.num_params, self.params)
+            self.params = self.zeros(self.params)
+            return ret_params
+
+    def put_params(self, params_):
+        self.params = jax.tree_map(lambda x,y: jnp.sum(x,y), params_, self.params)
+        self.token = mpi4jax.send(params_, (self.rank +1)%self.size, comm=self.comm, token=self.token)
+        
 
 @jax.jit
 def ring_all_reduce(comm, grads, compression=True):
@@ -107,7 +145,7 @@ def asyn_ring_all_reduce(comm, grads, compression=True):
     1. Start thread that receives grads
     2. repeat above process but instead of waiting for recieved_grads call thread results
     """
-    thread = MpiThread()
+    thread = PairAverageThread()
     thread.start()
     if not compression:
         flat_grads = jax.tree_flatten(grads)
@@ -121,7 +159,7 @@ def asyn_ring_all_reduce(comm, grads, compression=True):
         return grads
 
 
-def PairAverageOpt(comm, params, thread:MpiThread, token=None):
+def PairAverageOpt(comm, params, thread:PairAverageThread, token=None):
     """
     see Kung Fu docs https://kungfu.readthedocs.io/en/latest/?badge=latest
     Asynchronous Decentralized Parallel Stochastic Gradient Descent, ICML 2018
@@ -137,15 +175,17 @@ def PairAverageOpt(comm, params, thread:MpiThread, token=None):
     rank = comm.Get_rank()
     size = comm.Get_size()
     flat_params = jax.tree_flatten(params)
-    thread["params"] = falt_params[0]
+    thread["params"] = flat_params[0]
     while True:
         random_rank = random.randint(0, size-1)
         if random_rank != rank:
             break
-    send_req_to_rank()
+    DECINT_ai.node.send(None,"GET_GRADS")#TODO find away to pass rank IPs to pass ip
     ranks_params, token = mpi4jax.recv(flat_params[0], random_rank, comm=comm, token=token)
     params = jax.tree_map(lambda x,y: (x+y)/2., flat_params[0], ranks_params)
     return params
+
+
 
 
 def update_params(optimizer_, grads, opt_state, params, comm,synchronicity=False, compression=True, compression_d_type="float16"):
