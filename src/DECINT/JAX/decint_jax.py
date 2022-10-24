@@ -106,8 +106,8 @@ def pair_average_opt(params, thread: threads.PairAverageThread):
         ranks_params = grad_uncompress(ranks_params, thread.params_dtype)
     else:
         ranks_params, thread.token = mpi4jax.recv(flat_params[0], random_rank, comm=thread.comm, token=thread.token)
-    params = jax.tree_map(lambda x, y: (x + y) / 2., flat_params[0], ranks_params)
-    return params
+    return jax.tree_map(lambda x, y: (x + y) / 2., flat_params[0], ranks_params)
+
 
 
 def decint_opt(thread: threads.DecintMpiThread, params):
