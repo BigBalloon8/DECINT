@@ -7,7 +7,7 @@ import decint_jax
 
 
 class PairAverageThread(threading.Thread):
-    def __init__(self, params, comm, compression, comp_dtype):
+    def __init__(self, params, comm, compression=True, comp_dtype="float16"):
         super().__init__()
         self.params = params
         self.token = None
