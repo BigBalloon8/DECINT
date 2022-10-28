@@ -70,7 +70,7 @@ class DecintMpiThread(threading.Thread):
                                                            ((self.rank - 1) % self.size),
                                                            comm=self.comm, token=self.token)
 
-            self.params = jax.tree_map(lambda x, y: jnp.sum(x, y), recieved_params, self.params)
+            self.params = jax.tree_map(jnp.sum(), recieved_params, self.params)
             self.num_params += 1
 
     def __getitem__(self, key):
@@ -83,7 +83,7 @@ class DecintMpiThread(threading.Thread):
             return ret_params
 
     def put_params(self, params_):
-        self.params = jax.tree_map(lambda x, y: jnp.sum(x, y), params_, self.params)
+        self.params = jax.tree_map(jnp.sum(), params_, self.params)
         self.num_params += 1
         if self.compression:
             self.token = mpi4jax.send(decint_jax.grad_compress(params_, self.comp_dtype), (self.rank + 1) % self.size, comm=self.comm, token=self.token)

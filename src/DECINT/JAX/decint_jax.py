@@ -75,8 +75,7 @@ def ring_all_reduce(comm, grads, compression=True):
 
     if not compression:
         return jax.tree_unflatten(flat_grads[1], grads)
-    else:
-        return grads
+    return grads
 
 
 def pair_average_opt(params, thread: threads.PairAverageThread):
