@@ -15,9 +15,11 @@ def dumps(obj: Any) -> bytes:
     attributes = {}
     for i in attribute_kws:
         attributes[i] = getattr(obj, i)
+    #print(attributes)
     return quickle.dumps(attributes)
 
 if __name__ == "__main__":
+    import numpy
     class test:
         def __init__(self):
             self.a = 1
@@ -25,9 +27,9 @@ if __name__ == "__main__":
             self.c = "hello"
 
         def test(self):
-            print(self.a, self.b ,self.c)
+            print(self.a, self.b, self.c)
 
-    x = test()
+    x = test() #numpy.array([1,3,5,7,9])
     dumped = dumps(x)
     y = loads.loads(dumped, x)
     x.test()
