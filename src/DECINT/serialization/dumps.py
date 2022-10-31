@@ -22,7 +22,7 @@ if __name__ == "__main__":
     import numpy
     class test:
         def __init__(self):
-            self.a = 1
+            self.a = 30
             self.b = 7.5
             self.c = "hello"
 
