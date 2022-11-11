@@ -7,8 +7,9 @@ import decint_jax
 
 
 class PairAverageThread(threading.Thread):
+
     def __init__(self, params, comm, compression=True, comp_dtype="float16"):
-        super().__init__()
+        threading.Thread.__init__(self)
         self.params = params
         self.token = None
         self.comm = comm
@@ -41,51 +42,54 @@ class PairAverageThread(threading.Thread):
 
 
 class DecintMpiThread(threading.Thread):
-    def __init__(self, params, comm, compression=True, comp_dtype="float16"):
-        # grads something the same shape as grads
-        super().__init__()
-        self.params = self.zeros(params)
+    """
+    constantly receive gradients from other nodes and average
+    """
+    def __int__(self, gradients, comm, compression=True, comp_dtype="float16"):
+        threading.Thread.__init__(self)
+        self.gradients = self.zeros(gradients)
         self.comm = comm
-        self.num_params = 0
+        self.num_gradients = 0
         self.token = None
         self.size = self.comm.Get_size()
         self.rank = self.comm.Get_rank()
         self.compression = compression
         self.comp_dtype = comp_dtype
-        self.params_dtype = str(self.params[0][0].dtype)
-
+        self.gradients_dtype = str(self.gradients[0][0].dtype)
     @staticmethod
-    def zeros(params):
-        return [jnp.zeros_like(i) for i in params]
+    def zeros(gradients):
+        return [jnp.zeros_like(i) for i in gradients]
 
     def run(self):
         while True:
             if self.compression:
-                recieved_params, self.token = mpi4jax.recv(decint_jax.grad_compress(self.params, self.comp_dtype),
+                received_gradients, self.token = mpi4jax.recv(decint_jax.grad_compress(self.gradients, self.comp_dtype),
                                                            ((self.rank - 1) % self.size),
                                                            comm=self.comm, token=self.token)
-                recieved_params = decint_jax.grad_uncompress(self.params, recieved_params, self.params_dtype)
+                received_gradients = decint_jax.grad_uncompress(self.gradients, received_gradients, self.gradients_dtype)
             else:
-                recieved_params, self.token = mpi4jax.recv(self.params,
+                received_gradients, self.token = mpi4jax.recv(self.gradients,
                                                            ((self.rank - 1) % self.size),
                                                            comm=self.comm, token=self.token)
 
-            self.params = jax.tree_map(jnp.sum(), recieved_params, self.params)
-            self.num_params += 1
+            self.gradients = jax.tree_map(jnp.sum(), received_gradients, self.gradients)
+            self.num_gradients += 1
 
     def __getitem__(self, key):
-        if key == "params":
-            if self.num_params == 0:
+        if key == "grads":
+            if self.num_gradients == 0:
                 raise Exception(
-                    "must call put params before running func")  # TODO use custom Exception or just skip this step
-            ret_params = jax.tree_map(lambda x: x / self.num_params, self.params)
-            self.params = self.zeros(self.params)
-            return ret_params
+                    "must call put_grads before running func")  # TODO use custom Exception or just skip this step
+            ret_grads = jax.tree_map(lambda x: x / self.num_gradients, self.gradients)
+            self.gradients = self.zeros(self.gradients)
+            return ret_grads
 
-    def put_params(self, params_):
-        self.params = jax.tree_map(jnp.sum(), params_, self.params)
-        self.num_params += 1
+    def put_grads(self, gradients_):
+        self.gradients = jax.tree_map(jnp.sum(), gradients_, self.gradients)
+        self.num_gradients += 1
         if self.compression:
-            self.token = mpi4jax.send(decint_jax.grad_compress(params_, self.comp_dtype), (self.rank + 1) % self.size, comm=self.comm, token=self.token)
+            self.token = mpi4jax.send(decint_jax.grad_compress(gradients_, self.comp_dtype), (self.rank + 1) % self.size, comm=self.comm, token=self.token)
         else:
-            self.token = mpi4jax.send(params_, self.comp_dtype, (self.rank + 1) % self.size, comm=self.comm, token=self.token)
+            self.token = mpi4jax.send(gradients_, self.comp_dtype, (self.rank + 1) % self.size, comm=self.comm, token=self.token)
+
+

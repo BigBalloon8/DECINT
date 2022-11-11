@@ -111,4 +111,4 @@ def pair_average_opt(params, thread: threads.PairAverageThread):
 
 def decint_opt(thread: threads.DecintMpiThread, params):
     thread.put_params(params)
-    return thread["params"]
+    return thread["grads"]
