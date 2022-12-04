@@ -78,15 +78,15 @@ def ring_all_reduce(comm, grads, compression=True):
     return grads
 
 
-def pair_average_opt(params, thread: threads.PairAverageThread):
+def pair_average_opt(params, thread: threads.PairAverageProccess):
     """
     see Kung Fu docs https://kungfu.readthedocs.io/en/latest/?badge=latest
     Asynchronous Decentralized Parallel Stochastic Gradient Descent, ICML 2018
     https://arxiv.org/abs/1710.06952
 
-    1. start Thread that waits for param request
-    2. after param update select random rank from comm
-    3. send a pull request and receive model params from selected rank
+    1. start Thread that waits for param request (run outside of function)
+    2. after param update select random rank from comm (run outside of function)
+    3. send a request and receive model params from selected rank
     4. average params with local params
     5. save params to thread to allow other processes to average with updated params
     """
