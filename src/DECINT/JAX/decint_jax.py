@@ -1,4 +1,5 @@
 import jax
+import optax
 from mpi4py import MPI
 import mpi4jax
 import jax.numpy as jnp
@@ -108,7 +109,11 @@ def pair_average_opt(params, thread: threads.PairAverageProccess):
     return jax.tree_map(lambda x, y: (x + y) / 2., flat_params[0], ranks_params)
 
 
+def decint_opt(thread: threads.DecintMpiThread, grads, params, opt, opt_state):
+    thread.put_grads(grads)
+    grads = thread["grads"]
+    updates, opt_state = opt.update(grads, opt_state, params)
+    params = opt.apply_updates(updates, params)
+    return params, opt_state
 
-def decint_opt(thread: threads.DecintMpiThread, params):
-    thread.put_params(params)
-    return thread["grads"]
+d
