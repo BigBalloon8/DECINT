@@ -116,4 +116,4 @@ def decint_opt(thread: threads.DecintMpiThread, grads, params, opt, opt_state):
     params = opt.apply_updates(updates, params)
     return params, opt_state
 
-d
+
